@@ -119,7 +119,9 @@ static dispatch_queue_t ytkrequest_cache_writing_queue() {
         return;
     }
 
-    _dataFromCache = YES;
+    @synchronized (self) {
+        _dataFromCache = YES;
+    }
 
     dispatch_async(dispatch_get_main_queue(), ^{
         [self requestCompletePreprocessor];
@@ -142,13 +144,18 @@ static dispatch_queue_t ytkrequest_cache_writing_queue() {
 
 - (void)requestCompletePreprocessor {
     [super requestCompletePreprocessor];
-
+    
+    NSData *data = nil;
+    @synchronized (self) {
+        data = [super responseData];
+    }
+    
     if (self.writeCacheAsynchronously) {
         dispatch_async(ytkrequest_cache_writing_queue(), ^{
-            [self saveResponseDataToCacheFile:[super responseData]];
+            [self saveResponseDataToCacheFile:data];
         });
     } else {
-        [self saveResponseDataToCacheFile:[super responseData]];
+        [self saveResponseDataToCacheFile:data];
     }
 }
 
@@ -173,41 +180,51 @@ static dispatch_queue_t ytkrequest_cache_writing_queue() {
 #pragma mark -
 
 - (BOOL)isDataFromCache {
-    return _dataFromCache;
+    @synchronized (self) {
+        return _dataFromCache;
+    }
 }
 
 - (NSData *)responseData {
-    if (_cacheData) {
-        return _cacheData;
+    @synchronized (self) {
+        if (_cacheData) {
+            return _cacheData;
+        }
+        return [super responseData];
     }
-    return [super responseData];
 }
 
 - (NSString *)responseString {
-    if (_cacheString) {
-        return _cacheString;
+    @synchronized (self) {
+        if (_cacheString) {
+            return _cacheString;
+        }
+        return [super responseString];
     }
-    return [super responseString];
 }
 
 - (id)responseJSONObject {
-    if (_cacheJSON) {
-        return _cacheJSON;
+    @synchronized (self) {
+        if (_cacheJSON) {
+            return _cacheJSON;
+        }
+        return [super responseJSONObject];
     }
-    return [super responseJSONObject];
 }
 
 - (id)responseObject {
-    if (_cacheJSON) {
-        return _cacheJSON;
+    @synchronized (self) {
+        if (_cacheJSON) {
+            return _cacheJSON;
+        }
+        if (_cacheXML) {
+            return _cacheXML;
+        }
+        if (_cacheData) {
+            return _cacheData;
+        }
+        return [super responseObject];
     }
-    if (_cacheXML) {
-        return _cacheXML;
-    }
-    if (_cacheData) {
-        return _cacheData;
-    }
-    return [super responseObject];
 }
 
 #pragma mark -
@@ -308,21 +325,22 @@ static dispatch_queue_t ytkrequest_cache_writing_queue() {
     NSString *path = [self cacheFilePath];
     NSFileManager *fileManager = [NSFileManager defaultManager];
     NSError *error = nil;
-
-    if ([fileManager fileExistsAtPath:path isDirectory:nil]) {
-        NSData *data = [NSData dataWithContentsOfFile:path];
-        _cacheData = data;
-        _cacheString = [[NSString alloc] initWithData:_cacheData encoding:self.cacheMetadata.stringEncoding];
-        switch (self.responseSerializerType) {
-            case YTKResponseSerializerTypeHTTP:
-                // Do nothing.
-                return YES;
-            case YTKResponseSerializerTypeJSON:
-                _cacheJSON = [NSJSONSerialization JSONObjectWithData:_cacheData options:(NSJSONReadingOptions)0 error:&error];
-                return error == nil;
-            case YTKResponseSerializerTypeXMLParser:
-                _cacheXML = [[NSXMLParser alloc] initWithData:_cacheData];
-                return YES;
+    @synchronized (self) {
+        if ([fileManager fileExistsAtPath:path isDirectory:nil]) {
+            NSData *data = [NSData dataWithContentsOfFile:path];
+            _cacheData = data;
+            _cacheString = [[NSString alloc] initWithData:_cacheData encoding:self.cacheMetadata.stringEncoding];
+            switch (self.responseSerializerType) {
+                case YTKResponseSerializerTypeHTTP:
+                    // Do nothing.
+                    return YES;
+                case YTKResponseSerializerTypeJSON:
+                    _cacheJSON = [NSJSONSerialization JSONObjectWithData:_cacheData options:(NSJSONReadingOptions)0 error:&error];
+                    return error == nil;
+                case YTKResponseSerializerTypeXMLParser:
+                    _cacheXML = [[NSXMLParser alloc] initWithData:_cacheData];
+                    return YES;
+            }
         }
     }
     return NO;
@@ -350,12 +368,14 @@ static dispatch_queue_t ytkrequest_cache_writing_queue() {
 }
 
 - (void)clearCacheVariables {
-    _cacheData = nil;
-    _cacheXML = nil;
-    _cacheJSON = nil;
-    _cacheString = nil;
-    _cacheMetadata = nil;
-    _dataFromCache = NO;
+    @synchronized (self) {
+        _cacheData = nil;
+        _cacheXML = nil;
+        _cacheJSON = nil;
+        _cacheString = nil;
+        _cacheMetadata = nil;
+        _dataFromCache = NO;
+    }
 }
 
 #pragma mark -

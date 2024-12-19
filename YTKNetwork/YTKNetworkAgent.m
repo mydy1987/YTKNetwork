@@ -64,8 +64,7 @@
         _config = [YTKNetworkConfig sharedConfig];
         _manager = [[AFHTTPSessionManager alloc] initWithSessionConfiguration:_config.sessionConfiguration];
         _requestsRecord = [NSMutableDictionary dictionary];
-//        _processingQueue = dispatch_queue_create("com.yuantiku.networkagent.processing", DISPATCH_QUEUE_CONCURRENT);
-        _processingQueue = dispatch_get_main_queue();
+        _processingQueue = dispatch_queue_create("com.yuantiku.networkagent.processing", DISPATCH_QUEUE_CONCURRENT);
         _allStatusCodes = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(100, 500)];
         pthread_mutex_init(&_lock, NULL);
 
@@ -356,24 +355,27 @@
     NSError *requestError = nil;
     BOOL succeed = NO;
 
-    request.responseObject = responseObject;
-    if ([request.responseObject isKindOfClass:[NSData class]]) {
-        request.responseData = responseObject;
-        request.responseString = [[NSString alloc] initWithData:responseObject encoding:[YTKNetworkUtils stringEncodingWithRequest:request]];
+    @synchronized (request) {
+        request.responseObject = responseObject;
+        if ([request.responseObject isKindOfClass:[NSData class]]) {
+            request.responseData = responseObject;
+            request.responseString = [[NSString alloc] initWithData:responseObject encoding:[YTKNetworkUtils stringEncodingWithRequest:request]];
 
-        switch (request.responseSerializerType) {
-            case YTKResponseSerializerTypeHTTP:
-                // Default serializer. Do nothing.
-                break;
-            case YTKResponseSerializerTypeJSON:
-                request.responseObject = [self.jsonResponseSerializer responseObjectForResponse:task.response data:request.responseData error:&serializationError];
-                request.responseJSONObject = request.responseObject;
-                break;
-            case YTKResponseSerializerTypeXMLParser:
-                request.responseObject = [self.xmlParserResponseSerialzier responseObjectForResponse:task.response data:request.responseData error:&serializationError];
-                break;
+            switch (request.responseSerializerType) {
+                case YTKResponseSerializerTypeHTTP:
+                    // Default serializer. Do nothing.
+                    break;
+                case YTKResponseSerializerTypeJSON:
+                    request.responseObject = [self.jsonResponseSerializer responseObjectForResponse:task.response data:request.responseData error:&serializationError];
+                    request.responseJSONObject = request.responseObject;
+                    break;
+                case YTKResponseSerializerTypeXMLParser:
+                    request.responseObject = [self.xmlParserResponseSerialzier responseObjectForResponse:task.response data:request.responseData error:&serializationError];
+                    break;
+            }
         }
     }
+
     if (error) {
         succeed = NO;
         requestError = error;
@@ -431,16 +433,19 @@
     }
 
     // Load response from file and clean up if download task failed.
-    if ([request.responseObject isKindOfClass:[NSURL class]]) {
-        NSURL *url = request.responseObject;
-        if (url.isFileURL && [[NSFileManager defaultManager] fileExistsAtPath:url.path]) {
-            request.responseData = [NSData dataWithContentsOfURL:url];
-            request.responseString = [[NSString alloc] initWithData:request.responseData encoding:[YTKNetworkUtils stringEncodingWithRequest:request]];
+    @synchronized (request) {
+        if ([request.responseObject isKindOfClass:[NSURL class]]) {
+            NSURL *url = request.responseObject;
+            if (url.isFileURL && [[NSFileManager defaultManager] fileExistsAtPath:url.path]) {
+                request.responseData = [NSData dataWithContentsOfURL:url];
+                request.responseString = [[NSString alloc] initWithData:request.responseData encoding:[YTKNetworkUtils stringEncodingWithRequest:request]];
 
-            [[NSFileManager defaultManager] removeItemAtURL:url error:nil];
+                [[NSFileManager defaultManager] removeItemAtURL:url error:nil];
+            }
+            request.responseObject = nil;
         }
-        request.responseObject = nil;
     }
+
 
     @autoreleasepool {
         [request requestFailedPreprocessor];
